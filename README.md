@@ -8,5 +8,5 @@ The `dlx.sln` solution includes a regression test project. Execute all tests
 with:
 
 ```bash
-dotnet test pentomino_programs/dlx/dlx.sln
+dotnet test pentomino_programs/dlx.Tests
 ```
