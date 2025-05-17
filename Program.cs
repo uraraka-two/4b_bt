@@ -1,7 +1,11 @@
 using System;
+using System.Reflection;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+
+using YamlDotNet.Serialization;
+using YamlDotNet.Serialization.NamingConventions;
 
 namespace ImprovedPentominoSolver
 {
@@ -74,7 +78,8 @@ namespace ImprovedPentominoSolver
     public class Board
     {
         public int[,] Field { get; set; }
-        public FigureSet FigureSet { get; set; }
+        //public FigureSet FigureSet { get; set; }
+        public FigureSet FigureSet { get; set; } = null!;
 
         public Board(int rows = 0, int cols = 0)
         {
@@ -262,7 +267,6 @@ namespace ImprovedPentominoSolver
 
             // キャッシュの利用により列の再探索を回避（必要に応じて更新）
             for (ColumnHeader col = (ColumnHeader)RootHeader.Right; col != RootHeader; col = (ColumnHeader)col.Right)
-
             {
                 if (!col.Optional && col.Count < minCount)
                 {
@@ -428,79 +432,34 @@ namespace ImprovedPentominoSolver
     // FigureFactoryクラスの定義
     public class FigureFactory
     {
-        public static byte[,] ActiveSourceFiguresSet;
-        public static readonly byte[,] _SourceFiguresSet = {
-            // Figure 0: F
-            {
-                0x02, 0x06, 0x03, 0x00, 0x00
-            },
-            // Figure 1: I
-            {
-                0x01, 0x01, 0x01, 0x01, 0x01
-            },
-            // Figure 2: L
-            {
-                0x0F, 0x01, 0x00, 0x00, 0x00
-            },
-            // Figure 3: N
-            {
-                0x02, 0x03, 0x01, 0x01, 0x00
-            },
-            // Figure 4: P
-            {
-                0x06, 0x07, 0x00, 0x00, 0x00
-            },
-            // Figure 5: T
-            {
-                0x07, 0x02, 0x02, 0x00, 0x00
-            },
-            // Figure 6: U
-            {
-                0x07, 0x05, 0x00, 0x00, 0x00
-            },
-            // Figure 7: V
-            {
-                0x04, 0x04, 0x07, 0x00, 0x00
-            },
-            // Figure 8: W
-            {
-                0x03, 0x06, 0x04, 0x00, 0x00
-            },
-            // Figure 9: X
-            {
-                0x02, 0x07, 0x02, 0x00, 0x00
-            },
-            // Figure 10: Y
-            {
-                0x0F, 0x04, 0x00, 0x00, 0x00
-            },
-            // Figure 11: Z
-            {
-                0x06, 0x02, 0x03, 0x00, 0x00
-            }
-        };
+        private readonly HashSet<char> _selected;
 
+        private static byte[,] _activeSourceFiguresSet;
+        public byte[,] ActiveSourceFiguresSet => _activeSourceFiguresSet;
+        public int TypeCount => _activeSourceFiguresSet.GetLength(0);
 
         public List<Figure> Figures { get; } = new List<Figure>();
 
         public Dictionary<int, string> FigureIdToName { get; set; } = new Dictionary<int, string>();
 
-        public FigureFactory()
+        public FigureFactory(HashSet<char> selected)
         {
+            _selected = selected;                   // 空集合なら「全部」
             InitializeFigures();
         }
+        public FigureFactory() : this(new HashSet<char>()) {}
 
         private void InitializeFigures()
         {
-            ActiveSourceFiguresSet = GetSourceFiguresSetFromDat();
+            // ActiveSourceFiguresSetを初期化
+            _activeSourceFiguresSet = GetSourceFiguresSetFromDat(out List<string> figureLetters);
 
-            // フィギュアの文字を抽出
-            string context = ExtractFigureLetters(ActiveSourceFiguresSet);
-            this.FigureIdToName = CreateFigureIdToNameDictionary(context);
+            // フィギュアIDと名前の対応関係を構築
+            this.FigureIdToName = CreateFigureIdToNameDictionary(figureLetters);
 
-            for (int i = 0; i < ActiveSourceFiguresSet.GetLength(0); i++)
+            for (int i = 0; i < _activeSourceFiguresSet.GetLength(0); i++)
             {
-                long[] baseFigure = GetSourceFigure(i, ActiveSourceFiguresSet);
+                long[] baseFigure = GetSourceFigure(i, _activeSourceFiguresSet);
                 Figure baseFig = new Figure(i, baseFigure);
                 Figures.Add(baseFig);
 
@@ -512,78 +471,62 @@ namespace ImprovedPentominoSolver
                 }
             }
         }
-        static char GetFigureLetter(byte[] figureBytes)
-        {
-            string figureLetters = "FILNPTUVWXYZ";
 
-            for (int i = 0; i < _SourceFiguresSet.GetLength(0); i++)
+        // .d ファイルを選別して読み込む
+        private byte[,] GetSourceFiguresSetFromDat(out List<string> figureLetters)
+        {
+            Assembly asm = Assembly.GetExecutingAssembly();
+            // 埋め込まれたリソース名の一覧
+            string[] resourceNames = asm.GetManifestResourceNames()
+                                        .Where(n => n.Contains(".Data.") && n.EndsWith(".d", StringComparison.OrdinalIgnoreCase))
+                                        .OrderBy(n => n)                // A~Z 順に並べ替え
+                                        .ToArray();
+        
+            // selected によるフィルタ（空集合なら全部）
+            if (_selected.Count > 0)
             {
-                bool match = true;
-                for (int j = 0; j < _SourceFiguresSet.GetLength(1); j++)
-                {
-                    if (figureBytes[j] != _SourceFiguresSet[i, j])
+                resourceNames = resourceNames
+                    .Where(n =>
                     {
-                        match = false;
-                        break;
-                    }
-                }
-                if (match)
-                {
-                    return figureLetters[i];
-                }
+                        char letter = char.ToUpperInvariant(
+                                        Path.GetFileNameWithoutExtension(n)[^1]); // 末尾1文字
+                        return _selected.Contains(letter);
+                    })
+                    .ToArray();
             }
-
-            throw new ArgumentException("指定されたバイト配列に一致するフィギュアが見つかりませんでした。");
-        }
-
-        /// <summary>
-        /// ソースフィギュアセットからフィギュアの文字列を抽出します。
-        /// </summary>
-        /// <param name="fileFigures">ファイルから読み取ったフィギュアの2D配列</param>
-        /// <returns>フィギュアの文字列</returns>
-        static string ExtractFigureLetters(byte[,] fileFigures)
-        {
-            List<char> figureLetters = new List<char>();
-            int figureSize = fileFigures.GetLength(1);
-
-            for (int i = 0; i < fileFigures.GetLength(0); i++)
+        
+            figureLetters = resourceNames
+                            .Select(n => Path.GetFileNameWithoutExtension(n)[^1].ToString())
+                            .ToList();
+        
+            // バイト配列化
+            var figArr = resourceNames.Select(n =>
             {
-                byte[] figureBytes = new byte[figureSize];
-                for (int j = 0; j < figureSize; j++)
-                {
-                    figureBytes[j] = fileFigures[i, j];
-                }
-                figureLetters.Add(GetFigureLetter(figureBytes));
-            }
-
-            return new string(figureLetters.ToArray());
+                using Stream s = asm.GetManifestResourceStream(n)!;
+                using var ms   = new MemoryStream();
+                s.CopyTo(ms);
+                return ms.ToArray();
+            }).ToArray();
+        
+            return To2D(figArr);
         }
 
+
         /// <summary>
-        /// 抽出したフィギュアの文字列からIDと名前の辞書を作成します。
+        /// IDと名前の辞書を作成します。
         /// </summary>
-        /// <param name="context">フィギュアの文字列</param>
+        /// <param name="figureLetters">フィギュアの文字リスト</param>
         /// <returns>IDと名前の辞書</returns>
-        static Dictionary<int, string> CreateFigureIdToNameDictionary(string context)
+        static Dictionary<int, string> CreateFigureIdToNameDictionary(List<string> figureLetters)
         {
             Dictionary<int, string> figureIdToName = new Dictionary<int, string>();
-            for (int i = 0; i < context.Length; i++)
+            for (int i = 0; i < figureLetters.Count; i++)
             {
-                figureIdToName.Add(i, context[i].ToString());
+                figureIdToName.Add(i, figureLetters[i]);
             }
             return figureIdToName;
         }
 
-
-        private byte[,] GetSourceFiguresSetFromDat()
-        {
-            var dir = @"/home/ishiura/dev/pentominoOpenAI_o1_mini/bin/Debug/net8.0";
-            DirectoryInfo dirInfo = new(dir);
-            var figArr = dirInfo.GetFiles("*.d")
-                                    .Select(fileinfo => File.ReadAllBytes(fileinfo.FullName)).ToArray();
-            var sourceFigures = To2D(figArr);
-            return sourceFigures;
-        }
         /// <summary>
         /// https://stackoverflow.com/a/26291720
         /// </summary>
@@ -596,7 +539,6 @@ namespace ImprovedPentominoSolver
             try
             {
                 int FirstDim = source.Length;
-                Console.WriteLine($"{source}");// {SecondDim}");
                 int SecondDim = source.GroupBy(row => row.Length).Single().Key; // throws InvalidOperationException if source is not rectangular
 
                 var result = new T[FirstDim, SecondDim];
@@ -611,7 +553,6 @@ namespace ImprovedPentominoSolver
                 throw new InvalidOperationException("The given jagged array is not rectangular.");
             }
         }
-
 
         // フィギュアの基礎データを取得
         private long[] GetSourceFigure(int index, byte[,] active)
@@ -655,7 +596,6 @@ namespace ImprovedPentominoSolver
                 }
             }
 
-            //Console.WriteLine($"Base Figure: {baseFigure.BaseFigureId}, Variants: {variants.Count}");
             return variants;
         }
 
@@ -674,51 +614,54 @@ namespace ImprovedPentominoSolver
     // FigureSetクラスの定義
     public class FigureSet
     {
-        private FigureFactory figureFactory;
+        private readonly FigureFactory factory;
 
+        public FigureSet(HashSet<char> selected)
+        {
+            factory = new FigureFactory(selected);
+        }
         public FigureSet()
         {
-            figureFactory = new FigureFactory();
+            factory = new FigureFactory();
         }
 
-        public FigureFactory Factory => figureFactory;
+        public int TypeCount => factory.TypeCount;
+        public FigureFactory Factory => factory;
+
         public long[] GetFigureByIndex(int figureIndex)
         {
-            if (figureIndex < 0 || figureIndex >= figureFactory.Figures.Count)
+            if (figureIndex < 0 || figureIndex >= factory.Figures.Count)
                 throw new ArgumentOutOfRangeException(nameof(figureIndex));
 
-            return (long[])figureFactory.Figures[figureIndex].FigureData.Clone();
+            return (long[])factory.Figures[figureIndex].FigureData.Clone();
         }
 
         public int GetFigureIdByIndex(int figureIndex)
         {
-            if (figureIndex < 0 || figureIndex >= figureFactory.Figures.Count)
+            if (figureIndex < 0 || figureIndex >= factory.Figures.Count)
                 throw new ArgumentOutOfRangeException(nameof(figureIndex));
 
-            return figureFactory.Figures[figureIndex].BaseFigureId;
+            return factory.Figures[figureIndex].BaseFigureId;
         }
 
-        public int Count => figureFactory.Figures.Count;
-
-        // フィギュアの種類数を取得
-        public static int FigureTypeCount => FigureFactory.ActiveSourceFiguresSet.GetLength(0);
+        public int Count => factory.Figures.Count;
     }
 
     // PentominoSolverクラスの定義
     public class PentominoSolver
     {
-        private FigureFactory factory;
         private DancingLinks dancingLinks;
         private Board board;
         private FigureSet figureSet;
-        private static int FigureCellSize = FigureSet.FigureTypeCount;
+        private int FigureCellSize;
         private List<FigureInfo> figureInfoCache; // FigureInfoのキャッシュ
 
         public PentominoSolver(Board board)
         {
             this.board = board;
             this.figureSet = board.FigureSet;
-            dancingLinks = new DancingLinks(CountCells(board.Field) + FigureSet.FigureTypeCount);
+            this.FigureCellSize = figureSet.TypeCount;
+            dancingLinks = new DancingLinks(CountCells(board.Field) + figureSet.TypeCount);
             // FigureInfoのキャッシュを初期化
             figureInfoCache = new List<FigureInfo>();
             InitializeFigureInfoCache();
@@ -765,6 +708,7 @@ namespace ImprovedPentominoSolver
                 validPlacements.AddRange(placements);
             }
 
+/*
             // フィギュアIDと名前の対応関係を保持する辞書
             Dictionary<int, string> figureIdToName = figureSet.Factory.FigureIdToName;
             var q = from c in validPlacements
@@ -779,8 +723,8 @@ namespace ImprovedPentominoSolver
                     Console.WriteLine($"{item.FigureId}: {string.Join(',', c)}");
                 }
             }
+*/
         }
-
 
         private List<int> AddFigureToConstraintMatrix(long[] figure, RowInfo rowInfo, Board board)
         {
@@ -837,7 +781,8 @@ namespace ImprovedPentominoSolver
                     if (r >= 0 && r < board.Field.GetLength(0) &&
                         c >= 0 && c < board.Field.GetLength(1))
                     {
-                        solution[r, c] = (char)('A' + data.FigureInfo.FigureId);
+                        string figureName = figureSet.Factory.FigureIdToName[data.FigureInfo.FigureId];
+                        solution[r, c] = figureName[0];
                     }
                     else
                     {
@@ -853,23 +798,49 @@ namespace ImprovedPentominoSolver
     // Programクラスの定義
     public class Program
     {
-        static void Main(string[] args)
+        static HashSet<char> ParsePieceFlags(string[] args)
         {
-            Console.WriteLine("Pentomino Solver using Dancing Links");
-
-            Board board = new Board();
-            // フィギュアの種類数を取得
-            int figureTypeCount = FigureSet.FigureTypeCount;
-            int[,] boardField = new int[5, figureTypeCount]; // 5行とフィギュアの種類数の列を持つ配列を定義
-            for (int i = 0; i < 5; i++)
+            // -f -v -p ... のように文字を渡されたら大文字にして格納
+            var valid = new HashSet<char>{'F','V','P','U','N','Y',
+                                          'L','T','W','X','Z','I'};   // 12種すべて列挙しておく
+            var set   = new HashSet<char>();
+        
+            foreach (string a in args.Where(a => a.StartsWith('-')))
             {
-                for (int j = 0; j < figureTypeCount; j++)
+                foreach (char c in a.Skip(1))          // -fvp → f,v,p のように分割
                 {
-                    boardField[i, j] = 1;
+                    char upper = char.ToUpperInvariant(c);
+                    if (valid.Contains(upper))
+                        set.Add(upper);
                 }
             }
+            return set;
+        }
+
+        static (int W,int H) DecideBoard(int pieceCount) => (5, pieceCount);
+
+        static void Main(string[] args)
+        {
+            var selected = ParsePieceFlags(args); // 例: -v -p -u -n -y → {V,P,U,N,Y}
+            int pieceCnt = selected.Count switch { 0 => 12, var n => n };
+            //盤面を決定
+            var (W,H) = DecideBoard(pieceCnt); // W=5, H=pieceCnt
+
+            //Board を組み立て
+            Board board = new Board();
+            int[,] boardField = new int[H, W];         // ← 以前の (5,figureTypeCount) から変更
+            for (int i = 0; i < H; i++)
+                for (int j = 0; j < W; j++)
+                    boardField[i, j] = 1;
+
             board.Field = boardField;
+
+            FigureSet figureSet = new FigureSet(selected);
+            board.FigureSet    = figureSet;
             PentominoSolver solver = new PentominoSolver(board);
+
+            int figureTypeCount = pieceCnt;
+
             if (solver.Solve())
             {
                 Console.WriteLine("Solution found!");
@@ -880,6 +851,7 @@ namespace ImprovedPentominoSolver
             {
                 Console.WriteLine("No solution found.");
             }
+            Console.WriteLine($"boardField is 5, {figureTypeCount}");
         }
 
         static void PrintSolution(char[,] solution)
