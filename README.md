@@ -10,3 +10,13 @@ with:
 ```bash
 dotnet test pentomino_programs/dlx.Tests
 ```
+
+## Running the solver
+
+The solver accepts piece flags individually or combined. For example, the
+following commands are equivalent:
+
+```bash
+dotnet run -- -l -y -v -t -w -z
+dotnet run -- -lyvtwz
+```
