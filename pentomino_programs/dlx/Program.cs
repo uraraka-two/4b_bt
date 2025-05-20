@@ -14,8 +14,8 @@ namespace ImprovedPentominoSolver
         public Node Right { get; set; }
         public Node Up { get; set; }
         public Node Down { get; set; }
-        public ColumnHeader Header { get; set; }
-        public object NodeData { get; set; }
+        public ColumnHeader? Header { get; set; } = null;
+        public object? NodeData { get; set; } = null;
 
         public Node()
         {
@@ -225,7 +225,7 @@ namespace ImprovedPentominoSolver
                 return true; // 全ての列がカバーされた場合、解を見つけた
             }
 
-            ColumnHeader col = GetMinColumn();
+            ColumnHeader? col = GetMinColumn();
             if (col == null) return false;
 
             Cover(col);
@@ -257,9 +257,9 @@ namespace ImprovedPentominoSolver
         }
 
         // 最小の列を取得するメソッド（ノード数が最小の列）
-        private ColumnHeader GetMinColumn()
+        private ColumnHeader? GetMinColumn()
         {
-            ColumnHeader minColumn = null;
+            ColumnHeader? minColumn = null;
             int minCount = int.MaxValue;
 
             // キャッシュの利用により列の再探索を回避（必要に応じて更新）
@@ -296,7 +296,7 @@ namespace ImprovedPentominoSolver
         }
 
         // フィギュアが同じかを比較
-        public override bool Equals(object obj)
+        public override bool Equals(object? obj)
         {
             if (obj is Figure other)
             {
@@ -431,7 +431,7 @@ namespace ImprovedPentominoSolver
     {
         private readonly HashSet<char> _selected;
 
-        private static byte[,] _activeSourceFiguresSet;
+        private static byte[,] _activeSourceFiguresSet = null!;
         public byte[,] ActiveSourceFiguresSet => _activeSourceFiguresSet;
         public int TypeCount => _activeSourceFiguresSet.GetLength(0);
 
